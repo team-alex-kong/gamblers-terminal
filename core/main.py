@@ -7,9 +7,11 @@ is a pure factory (no import-time work); `create_app` is the zero-arg entry that
 uvicorn calls via `--factory`.
 """
 
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import ExitStack, asynccontextmanager
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -25,6 +27,39 @@ from core.registry import discover_modules
 
 _HERE = Path(__file__).resolve().parent
 SESSION_MAX_AGE = 7 * 24 * 60 * 60  # 7 days
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+logger = logging.getLogger(__name__)
+
+
+def configure_logging(log_dir: Path = Path("var/log")) -> TimedRotatingFileHandler:
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    existing = next((h for h in root.handlers if isinstance(h, TimedRotatingFileHandler)), None)
+    if existing is not None:
+        return existing
+
+    log_dir.mkdir(parents=True, exist_ok=True)
+    formatter = logging.Formatter(LOG_FORMAT)
+    file_handler = TimedRotatingFileHandler(
+        log_dir / "app.log",
+        when="midnight",
+        interval=1,
+        backupCount=7,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(formatter)
+    root.addHandler(file_handler)
+
+    if not any(type(h) is logging.StreamHandler for h in root.handlers):
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        root.addHandler(stream_handler)
+
+    for name in ("uvicorn", "uvicorn.access"):
+        uv_logger = logging.getLogger(name)
+        if not any(isinstance(h, TimedRotatingFileHandler) for h in uv_logger.handlers):
+            uv_logger.addHandler(file_handler)
+    return file_handler
 
 
 def _log_config(config: host_config.HostConfig, modules: list[Module]) -> None:
@@ -35,14 +70,14 @@ def _log_config(config: host_config.HostConfig, modules: list[Module]) -> None:
         tokens_disp = tokens or "[]  (auth DISABLED)"
     else:
         tokens_disp = f"{len(tokens)} configured" if tokens else "none (auth DISABLED)"
-    print(f"[gamblers-toolbox] config:      {host_config.config_source()}")
-    print(f"[gamblers-toolbox] bind:        {config.host}:{config.port}")
-    print(f"[gamblers-toolbox] secret_key:  {secret_disp}")
-    print(f"[gamblers-toolbox] auth_tokens: {tokens_disp}")
-    print(f"[gamblers-toolbox] modules:     {', '.join(m.slug for m in modules) or '(none)'}")
-    print(f"[gamblers-toolbox] schedulers:  {'on' if config.enable_schedulers else 'off'}")
+    logger.info("config:      %s", host_config.config_source())
+    logger.info("bind:        %s:%s", config.host, config.port)
+    logger.info("secret_key:  %s", secret_disp)
+    logger.info("auth_tokens: %s", tokens_disp)
+    logger.info("modules:     %s", ", ".join(m.slug for m in modules) or "(none)")
+    logger.info("schedulers:  %s", "on" if config.enable_schedulers else "off")
     if tokens and not show:
-        print("[gamblers-toolbox] (set GAMBLERS_TOOLBOX_LOG_SECRETS=1 to print token/secret values)")
+        logger.info("(set GAMBLERS_TOOLBOX_LOG_SECRETS=1 to log token/secret values)")
 
 
 def _validate_modules(modules: list[Module]) -> None:
@@ -108,6 +143,7 @@ def build_app(config: host_config.HostConfig, modules: list[Module]) -> FastAPI:
 
 def create_app() -> FastAPI:
     """Zero-arg factory for uvicorn (`uvicorn --factory core.main:create_app`)."""
+    configure_logging()
     config = host_config.load_config()
     modules = discover_modules()
     _log_config(config, modules)

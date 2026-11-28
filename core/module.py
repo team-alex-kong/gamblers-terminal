@@ -5,12 +5,15 @@ its static dir, and enters its `lifespan` for the life of the app. Everything
 else — data, schedulers, templates — stays private to the module.
 """
 
+import logging
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 
 from fastapi import APIRouter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -45,7 +48,7 @@ def periodic_job(
                 fn()
             except Exception as exc:
                 if not (busy and isinstance(exc, busy)):
-                    print(f"  {name}: scheduled refresh failed ({exc})")
+                    logger.error("%s: scheduled refresh failed (%s)", name, exc)
             stop.wait(interval_seconds)
 
     threading.Thread(target=loop, name=f"periodic-{name}", daemon=True).start()

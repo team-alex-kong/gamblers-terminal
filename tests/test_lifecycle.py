@@ -1,11 +1,14 @@
+import logging
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import TypeVar
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import core.main as main
 import core.module as mod
 import modules.ai_ratios.cache as ai_cache
 import modules.crypto_tracker.cache as crypto_cache
@@ -50,7 +53,7 @@ def test_schedulers_disabled_still_initialises(make_app: Callable[..., FastAPI],
     assert inited
 
 
-def test_periodic_job_skips_busy_and_recovers(capsys: pytest.CaptureFixture[str]) -> None:
+def test_periodic_job_skips_busy_and_recovers(caplog: pytest.LogCaptureFixture) -> None:
     class _Busy(Exception):
         pass
 
@@ -66,8 +69,30 @@ def test_periodic_job_skips_busy_and_recovers(capsys: pytest.CaptureFixture[str]
             raise RuntimeError("boom")
         done.set()
 
-    with mod.periodic_job("demo", tick, 0.01, _Busy):
+    with caplog.at_level(logging.ERROR, logger="core.module"), mod.periodic_job("demo", tick, 0.01, _Busy):
         assert done.wait(timeout=2)
-    out = capsys.readouterr().out
-    assert "demo: scheduled refresh failed (boom)" in out
-    assert "_Busy" not in out
+    assert "demo: scheduled refresh failed (boom)" in caplog.text
+    assert "_Busy" not in caplog.text
+
+
+def test_configure_logging_daily_rotation(tmp_path: Path) -> None:
+    root = logging.getLogger()
+    uv_loggers = [logging.getLogger(n) for n in ("uvicorn", "uvicorn.access")]
+    before = list(root.handlers)
+    log_dir = tmp_path / "var" / "log"
+    handler = main.configure_logging(log_dir)
+    try:
+        assert handler.when == "MIDNIGHT"
+        assert handler.backupCount == 7
+        assert main.configure_logging(log_dir) is handler
+        logging.getLogger("test.logging").info("hello rotation")
+        handler.flush()
+        assert "hello rotation" in (log_dir / "app.log").read_text(encoding="utf-8")
+    finally:
+        for lg in [root, *uv_loggers]:
+            if handler in lg.handlers:
+                lg.removeHandler(handler)
+        for h in list(root.handlers):
+            if h not in before:
+                root.removeHandler(h)
+        handler.close()

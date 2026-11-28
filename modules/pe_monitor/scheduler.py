@@ -4,11 +4,13 @@ Snapshots are single-flight — a scheduled tick overlapping a running snapshot 
 skipped; a manual refresh that overlaps raises Busy (surfaced as HTTP 409).
 """
 
+import logging
 import threading
 from typing import Any
 
 from . import fetcher, storage
 
+logger = logging.getLogger(__name__)
 _snapshot_lock = threading.Lock()
 
 
@@ -31,8 +33,8 @@ def snapshot_all(tickers: list[str], db_path: str) -> None:
                 if _has_usable_data(snap):
                     storage.append_snapshot(db_path, t, snap)
                 else:
-                    print(f"  Skipping {t}: no usable price in response")
+                    logger.warning("Skipping %s: no usable price in response", t)
             except Exception as e:
-                print(f"  Warning: could not fetch {t}: {e}")
+                logger.warning("Could not fetch %s: %s", t, e)
     finally:
         _snapshot_lock.release()
