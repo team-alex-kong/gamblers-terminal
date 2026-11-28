@@ -78,7 +78,7 @@ def test_periodic_job_skips_busy_and_recovers(caplog: pytest.LogCaptureFixture) 
 def test_configure_logging_daily_rotation(tmp_path: Path) -> None:
     root = logging.getLogger()
     uv_loggers = [logging.getLogger(n) for n in ("uvicorn", "uvicorn.access")]
-    before = list(root.handlers)
+    before, level = list(root.handlers), root.level
     log_dir = tmp_path / "var" / "log"
     handler = main.configure_logging(log_dir)
     try:
@@ -96,3 +96,4 @@ def test_configure_logging_daily_rotation(tmp_path: Path) -> None:
             if h not in before:
                 root.removeHandler(h)
         handler.close()
+        root.setLevel(level)
