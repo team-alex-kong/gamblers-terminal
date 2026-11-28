@@ -7,8 +7,6 @@ skipped; a manual refresh that overlaps raises Busy (surfaced as HTTP 409).
 import threading
 from typing import Any
 
-from apscheduler.schedulers.background import BackgroundScheduler
-
 from . import fetcher, storage
 
 _snapshot_lock = threading.Lock()
@@ -38,25 +36,3 @@ def snapshot_all(tickers: list[str], db_path: str) -> None:
                 print(f"  Warning: could not fetch {t}: {e}")
     finally:
         _snapshot_lock.release()
-
-
-def _snapshot_safe(tickers: list[str], db_path: str) -> None:
-    try:
-        snapshot_all(tickers, db_path)
-    except Busy:
-        print("  pe_monitor: snapshot already running; skipping tick")
-    except Exception as e:
-        print(f"  pe_monitor: snapshot failed: {e}")
-
-
-def start_scheduler(
-    tickers: list[str], db_path: str, interval_seconds: int
-) -> BackgroundScheduler:
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(
-        _snapshot_safe, "interval",
-        seconds=interval_seconds, args=[tickers, db_path], id="snapshot",
-    )
-    scheduler.add_job(_snapshot_safe, args=[tickers, db_path], id="snapshot_initial")
-    scheduler.start()
-    return scheduler

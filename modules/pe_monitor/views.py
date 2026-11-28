@@ -5,7 +5,7 @@ importing this module has no side effects.
 """
 
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -14,6 +14,8 @@ from typing import Any, cast
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+
+from core.module import periodic_job
 
 from . import config, scheduler, storage
 
@@ -417,13 +419,11 @@ def lifespan() -> Iterator[None]:
     yield
 
 
-@contextmanager
-def scheduler_lifespan() -> Iterator[None]:
+def scheduler_lifespan() -> AbstractContextManager[None]:
     cfg = _cfg()
-    sched = scheduler.start_scheduler(
-        cfg["tickers"], cfg["database_path"], cfg["fetch_interval_seconds"]
+    return periodic_job(
+        "pe_monitor",
+        lambda: scheduler.snapshot_all(cfg["tickers"], cfg["database_path"]),
+        cfg["fetch_interval_seconds"],
+        scheduler.Busy,
     )
-    try:
-        yield
-    finally:
-        sched.shutdown(wait=False)

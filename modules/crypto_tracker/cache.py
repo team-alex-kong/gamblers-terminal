@@ -6,10 +6,9 @@ refresh keeps the last known-good result and records the error.
 """
 
 import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager
 
-from apscheduler.schedulers.background import BackgroundScheduler
+from core.module import periodic_job
 
 from . import config, twr
 
@@ -51,25 +50,5 @@ def refresh() -> dict[str, object]:
         _refresh_lock.release()
 
 
-def _scheduled_refresh() -> None:
-    try:
-        refresh()
-    except Busy:
-        pass
-    except Exception as e:
-        print(f"  crypto_tracker: scheduled refresh failed ({e})")
-
-
-@contextmanager
-def scheduler_lifespan() -> Iterator[None]:
-    sched = BackgroundScheduler()
-    sched.add_job(
-        _scheduled_refresh, "interval",
-        seconds=config.REFRESH_INTERVAL_SECONDS, id="crypto_tracker_refresh",
-    )
-    sched.add_job(_scheduled_refresh, id="crypto_tracker_initial")  # one-off, ASAP
-    sched.start()
-    try:
-        yield
-    finally:
-        sched.shutdown(wait=False)
+def scheduler_lifespan() -> AbstractContextManager[None]:
+    return periodic_job("crypto_tracker", refresh, config.REFRESH_INTERVAL_SECONDS, Busy)
