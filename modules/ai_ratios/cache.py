@@ -6,12 +6,11 @@ a low-coverage pull never overwrites a good result.
 """
 
 import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from typing import cast
 
-from apscheduler.schedulers.background import BackgroundScheduler
+from core.module import periodic_job
 
 from . import config, core
 
@@ -85,25 +84,5 @@ def refresh() -> dict[str, object]:
         _refresh_lock.release()
 
 
-def _scheduled_refresh() -> None:
-    try:
-        refresh()
-    except Busy:
-        pass
-    except Exception as e:
-        print(f"  ai_ratios: scheduled refresh failed ({e})")
-
-
-@contextmanager
-def scheduler_lifespan() -> Iterator[None]:
-    sched = BackgroundScheduler()
-    sched.add_job(
-        _scheduled_refresh, "interval",
-        seconds=config.REFRESH_INTERVAL_SECONDS, id="ai_ratios_refresh",
-    )
-    sched.add_job(_scheduled_refresh, id="ai_ratios_initial")  # one-off, ASAP
-    sched.start()
-    try:
-        yield
-    finally:
-        sched.shutdown(wait=False)
+def scheduler_lifespan() -> AbstractContextManager[None]:
+    return periodic_job("ai_ratios", refresh, config.REFRESH_INTERVAL_SECONDS, Busy)

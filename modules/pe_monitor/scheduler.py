@@ -4,13 +4,13 @@ Snapshots are single-flight — a scheduled tick overlapping a running snapshot 
 skipped; a manual refresh that overlaps raises Busy (surfaced as HTTP 409).
 """
 
+import logging
 import threading
 from typing import Any
 
-from apscheduler.schedulers.background import BackgroundScheduler
-
 from . import fetcher, storage
 
+logger = logging.getLogger(__name__)
 _snapshot_lock = threading.Lock()
 
 
@@ -33,30 +33,8 @@ def snapshot_all(tickers: list[str], db_path: str) -> None:
                 if _has_usable_data(snap):
                     storage.append_snapshot(db_path, t, snap)
                 else:
-                    print(f"  Skipping {t}: no usable price in response")
+                    logger.warning("Skipping %s: no usable price in response", t)
             except Exception as e:
-                print(f"  Warning: could not fetch {t}: {e}")
+                logger.warning("Could not fetch %s: %s", t, e)
     finally:
         _snapshot_lock.release()
-
-
-def _snapshot_safe(tickers: list[str], db_path: str) -> None:
-    try:
-        snapshot_all(tickers, db_path)
-    except Busy:
-        print("  pe_monitor: snapshot already running; skipping tick")
-    except Exception as e:
-        print(f"  pe_monitor: snapshot failed: {e}")
-
-
-def start_scheduler(
-    tickers: list[str], db_path: str, interval_seconds: int
-) -> BackgroundScheduler:
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(
-        _snapshot_safe, "interval",
-        seconds=interval_seconds, args=[tickers, db_path], id="snapshot",
-    )
-    scheduler.add_job(_snapshot_safe, args=[tickers, db_path], id="snapshot_initial")
-    scheduler.start()
-    return scheduler

@@ -5,11 +5,15 @@ its static dir, and enters its `lifespan` for the life of the app. Everything
 else — data, schedulers, templates — stays private to the module.
 """
 
-from contextlib import AbstractContextManager
+import logging
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 from fastapi import APIRouter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -19,11 +23,36 @@ class Module:
     description: str          # one-line landing-card text
     router: APIRouter         # included at prefix=/<slug>, tags=[name]
     order: int = 100          # lower sorts earlier on the landing page
-    icon: Optional[str] = None
-    static_dir: Optional[str] = None   # abs path mounted at /<slug>/static
-    static_name: Optional[str] = None  # url_for name (match the template)
+    icon: str | None = None
+    static_dir: str | None = None   # abs path mounted at /<slug>/static
+    static_name: str | None = None  # url_for name (match the template)
     # Resource setup (e.g. create/migrate the DB). Entered on every instance.
-    lifespan: Optional[Callable[[], AbstractContextManager[None]]] = None
+    lifespan: Callable[[], AbstractContextManager[None]] | None = None
     # Background jobs. Skipped when the host runs with enable_schedulers=false,
     # so replicas still initialise but jobs run on exactly one instance.
-    scheduler: Optional[Callable[[], AbstractContextManager[None]]] = None
+    scheduler: Callable[[], AbstractContextManager[None]] | None = None
+
+
+@contextmanager
+def periodic_job(
+    name: str,
+    fn: Callable[[], object],
+    interval_seconds: float,
+    busy: type[Exception] | None = None,
+) -> Iterator[None]:
+    stop = threading.Event()
+
+    def loop() -> None:
+        while not stop.is_set():
+            try:
+                fn()
+            except Exception as exc:
+                if not (busy and isinstance(exc, busy)):
+                    logger.error("%s: scheduled refresh failed (%s)", name, exc)
+            stop.wait(interval_seconds)
+
+    threading.Thread(target=loop, name=f"periodic-{name}", daemon=True).start()
+    try:
+        yield
+    finally:
+        stop.set()
