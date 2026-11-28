@@ -31,7 +31,7 @@ LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 logger = logging.getLogger(__name__)
 
 
-def configure_logging(log_dir: Path = Path("var/log")) -> TimedRotatingFileHandler:
+def configure_logging(log_dir: Path = _HERE.parent / "var" / "log") -> TimedRotatingFileHandler:
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     existing = next((h for h in root.handlers if isinstance(h, TimedRotatingFileHandler)), None)
